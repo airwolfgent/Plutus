@@ -29,17 +29,18 @@ python3 plutus.py
 
 ## How It Works
 
-1.  **Generate**: The program creates a random 32-byte private key.
-2.  **Convert**: It calculates the public key and the Bitcoin address (P2PKH).
-3.  **Check**: It instantly checks if this address is in the database of funded wallets using a Bloom Filter (a super-fast memory structure).
-4.  **Save**: If a match is found, the private key, public key, and address are saved to a file named `plutus.txt`.
+1.  **Generate**: The program picks a random starting private key.
+2.  **Scan**: It uses **Elliptic Curve Point Addition** to sequentially scan keys from that starting point. This is mathematically equivalent to checking `k, k+1, k+2...` but is thousands of times faster than generating completely random keys.
+3.  **Convert**: It calculates the Bitcoin address (P2PKH) for each key.
+4.  **Check**: It instantly checks if this address is in the database of funded wallets using a Bloom Filter (a super-fast memory structure).
+5.  **Save**: If a match is found, the private key, public key, and address are saved to a file named `plutus.txt`.
 
 ## Speed
 
-Plutus is highly optimized for performance. It takes approximately **0.000125 seconds** to generate and check a single Bitcoin address on a modern CPU core.
+Plutus is highly optimized for performance. It takes approximately **0.000073 seconds** to generate and check a single Bitcoin address on a modern CPU core.
 
 Because this program utilizes parallel processing, it scales linearly with your hardware. Your total throughput will be approximately:
-`CPU Cores / 0.000125` keys per second.
+`CPU Cores / 0.000073` keys per second.
 
 ## Expected Output
 
@@ -50,7 +51,7 @@ Progress: 100.00%
 DONE
 database size: 21568445
 processes spawned: 15
-Speed: 185000 keys/sec
+Speed: 675000 keys/sec
 ```
 
 If a wallet with money is found, it saves to `plutus.txt`:

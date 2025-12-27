@@ -2,7 +2,7 @@
 # Made by Isaac Delly
 # https://github.com/Isaacdelly/Plutus
 
-from coincurve import PrivateKey as CCPrivateKey
+from coincurve import PrivateKey as CCPrivateKey, PublicKey as CCPublicKey
 import multiprocessing
 from multiprocessing import Value
 import hashlib
@@ -14,6 +14,8 @@ import argparse
 
 DATABASE = r'database/12_26_2025/'
 ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+GENERATOR_PUBLIC_KEY = CCPrivateKey(int(1).to_bytes(32, 'big')).public_key
 
 class BloomFilter:
     def __init__(self, size_in_mb=256):
@@ -87,9 +89,19 @@ def private_key_to_wif(private_key):
 
 def main(database, args, counter):
     local_counter = 0
+    
+    # Pick a random starting number
+    private_key_int = int.from_bytes(os.urandom(32), 'big')
+    
+    # Calculate the initial Public Key
+    current_key = CCPrivateKey(private_key_int.to_bytes(32, 'big'))
+    current_pub_key = current_key.public_key
+
     while True:
-        private_key = generate_private_key()
-        public_key_bytes = private_key_to_public_key(private_key) 
+        # Get compressed bytes for hashing
+        public_key_bytes = current_pub_key.format(compressed=True)
+        
+        # Generate Address
         address = public_key_to_address(public_key_bytes)
 
         if args['verbose']:
@@ -101,22 +113,31 @@ def main(database, args, counter):
                     counter.value += local_counter
                 local_counter = 0
         
-        # Check Bloom Filter first
+        # Check Bloom Filter
         if address in database:
-            # Double check against actual files to rule out false positives
+            # Convert our int tracker back to hex for the log/check
+            private_key_hex = hex(private_key_int)[2:].zfill(64).upper()
+            
             found = False
             for filename in os.listdir(DATABASE):
                 with open(DATABASE + filename) as file:
                     if address in file.read():
                         found = True
                         with open('plutus.txt', 'a') as plutus:
-                            plutus.write('hex private key: ' + str(private_key) + '\n' +
-                                         'WIF private key: ' + str(private_key_to_wif(private_key)) + '\n' +
+                            plutus.write('hex private key: ' + private_key_hex + '\n' +
+                                         'WIF private key: ' + str(private_key_to_wif(private_key_hex)) + '\n' +
                                          'public key: ' + public_key_bytes.hex().upper() + '\n' +
                                          'address: ' + str(address) + '\n\n')
                         break
             if found:
                 print(f"FOUND: {address}")
+
+        # SHORTCUT: Point Addition
+        # Instead of generating a new key from scratch, we add G to the current point Pub(k+1) = Pub(k) + G
+        current_pub_key = CCPublicKey.combine_keys([current_pub_key, GENERATOR_PUBLIC_KEY])
+        
+        # Keep our integer tracker in sync so we know the private key if we find a match
+        private_key_int += 1
 
 def timer():
     start = time.time()
