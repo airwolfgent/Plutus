@@ -170,7 +170,6 @@ Examples:
     parser.add_argument('action', nargs='?', default='run', choices=['run', 'time', 'help'], help='Action to perform')
     parser.add_argument('--verbose', '-v', type=int, choices=[0, 1], default=0, help='Verbose output (0 or 1)')
     parser.add_argument('--cpu-count', '-c', type=int, default=default_cpu_count, help='Number of CPU cores')
-    parser.add_argument('--substring', '-s', type=int, default=8, help='Deprecated (ignored)')
 
     args = parser.parse_args()
 
