@@ -1,2 +1,1 @@
-fastecdsa
-starkbank-ecdsa
+coincurve

@@ -2,44 +2,70 @@
 # Made by Isaac Delly
 # https://github.com/Isaacdelly/Plutus
 
-from fastecdsa import keys, curve
-from ellipticcurve.privateKey import PrivateKey
-import platform
+from coincurve import PrivateKey as CCPrivateKey
 import multiprocessing
+from multiprocessing import Value
 import hashlib
 import binascii
 import os
 import sys
 import time
+import argparse
 
-DATABASE = r'database/11_13_2022/'
+DATABASE = r'database/12_26_2025/'
+ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+class BloomFilter:
+    def __init__(self, size_in_mb=256):
+        self.size = size_in_mb * 1024 * 1024 * 8
+        self.bit_array = bytearray(self.size // 8)
+        self.hash_count = 6 
+
+    def get_indices(self, string):
+        h = hashlib.sha256(string.encode()).digest()
+        indices = []
+        for i in range(self.hash_count):
+            start = i * 4
+            chunk = h[start : start + 4]
+            val = int.from_bytes(chunk, 'big')
+            indices.append(val % self.size)
+        return indices
+
+    def add(self, string):
+        for index in self.get_indices(string):
+            byte_index = index // 8
+            bit_index = index % 8
+            self.bit_array[byte_index] |= (1 << bit_index)
+
+    def __contains__(self, string):
+        for index in self.get_indices(string):
+            byte_index = index // 8
+            bit_index = index % 8
+            if not (self.bit_array[byte_index] & (1 << bit_index)):
+                return False
+        return True
 
 def generate_private_key():
     return binascii.hexlify(os.urandom(32)).decode('utf-8').upper()
 
-def private_key_to_public_key(private_key, fastecdsa):
-    if fastecdsa:
-        key = keys.get_public_key(int('0x' + private_key, 0), curve.secp256k1)
-        return '04' + (hex(key.x)[2:] + hex(key.y)[2:]).zfill(128)
-    else:
-        pk = PrivateKey().fromString(bytes.fromhex(private_key))
-        return '04' + pk.publicKey().toString().hex().upper()
+def private_key_to_public_key(private_key):
+    pk = CCPrivateKey(bytes.fromhex(private_key))
+    return pk.public_key.format(compressed=True)
 
-def public_key_to_address(public_key):
+def public_key_to_address(public_key_bytes):
+    sha256_bpk = hashlib.sha256(public_key_bytes).digest()
+    ripemd160_bpk = hashlib.new('ripemd160', sha256_bpk).digest()
+    prepend_network_byte = b'\x00' + ripemd160_bpk
+    checksum = hashlib.sha256(hashlib.sha256(prepend_network_byte).digest()).digest()[:4]
+    address_bytes = prepend_network_byte + checksum
+    value = int.from_bytes(address_bytes, 'big')
     output = []
-    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-    var = hashlib.new('ripemd160')
-    encoding = binascii.unhexlify(public_key.encode())
-    var.update(hashlib.sha256(encoding).digest())
-    var_encoded = ('00' + var.hexdigest()).encode()
-    digest = hashlib.sha256(binascii.unhexlify(var_encoded)).digest()
-    var_hex = '00' + var.hexdigest() + hashlib.sha256(digest).hexdigest()[0:8]
-    count = [char != '0' for char in var_hex].index(True) // 2
-    n = int(var_hex, 16)
-    while n > 0:
-        n, remainder = divmod(n, 58)
-        output.append(alphabet[remainder])
-    for i in range(count): output.append(alphabet[0])
+    while value > 0:
+        value, remainder = divmod(value, 58)
+        output.append(ALPHABET[remainder])
+    for byte in address_bytes:
+        if byte == 0: output.append(ALPHABET[0])
+        else: break
     return ''.join(output[::-1])
 
 def private_key_to_wif(private_key):
@@ -59,107 +85,129 @@ def private_key_to_wif(private_key):
         else: break
     return chars[0] * pad + result
 
-def main(database, args):
+def main(database, args, counter):
+    local_counter = 0
     while True:
         private_key = generate_private_key()
-        public_key = private_key_to_public_key(private_key, args['fastecdsa']) 
-        address = public_key_to_address(public_key)
+        public_key_bytes = private_key_to_public_key(private_key) 
+        address = public_key_to_address(public_key_bytes)
 
         if args['verbose']:
             print(address)
+        else:
+            local_counter += 1
+            if local_counter >= 1000:
+                with counter.get_lock():
+                    counter.value += local_counter
+                local_counter = 0
         
-        if address[-args['substring']:] in database:
+        # Check Bloom Filter first
+        if address in database:
+            # Double check against actual files to rule out false positives
+            found = False
             for filename in os.listdir(DATABASE):
                 with open(DATABASE + filename) as file:
                     if address in file.read():
+                        found = True
                         with open('plutus.txt', 'a') as plutus:
                             plutus.write('hex private key: ' + str(private_key) + '\n' +
-                                         'WIF private key: ' + str(private_key_to_wif(private_key)) + '\n'
-                                         'public key: ' + str(public_key) + '\n' +
-                                         'uncompressed address: ' + str(address) + '\n\n')
+                                         'WIF private key: ' + str(private_key_to_wif(private_key)) + '\n' +
+                                         'public key: ' + public_key_bytes.hex().upper() + '\n' +
+                                         'address: ' + str(address) + '\n\n')
                         break
+            if found:
+                print(f"FOUND: {address}")
 
-def print_help():
-    print('''Plutus homepage: https://github.com/Isaacdelly/Plutus
-Plutus QA support: https://github.com/Isaacdelly/Plutus/issues
-
-
-Speed test: 
-execute 'python3 plutus.py time', the output will be the time it takes to bruteforce a single address in seconds
-
-
-Quick start: run command 'python3 plutus.py'
-
-By default this program runs with parameters:
-python3 plutus.py verbose=0 substring=8
-
-verbose: must be 0 or 1. If 1, then every bitcoin address that gets bruteforced will be printed to the terminal. This has the potential to slow the program down. An input of 0 will not print anything to the terminal and the bruteforcing will work silently. By default verbose is 0.
-
-substring: to make the program memory efficient, the entire bitcoin address is not loaded from the database. Only the last <substring> characters are loaded. This significantly reduces the amount of RAM required to run the program. if you still get memory errors then try making this number smaller, by default it is set to 8. This opens us up to getting false positives (empty addresses mistaken as funded) with a probability of 1/(16^<substring>), however it does NOT leave us vulnerable to false negatives (funded addresses being mistaken as empty) so this is an acceptable compromise.
-
-cpu_count: number of cores to run concurrently. More cores = more resource usage but faster bruteforcing. Omit this parameter to run with the maximum number of cores''')
-    sys.exit(0)
-
-def timer(args):
+def timer():
     start = time.time()
     private_key = generate_private_key()
-    public_key = private_key_to_public_key(private_key, args['fastecdsa'])
-    address = public_key_to_address(public_key)
+    public_key_bytes = private_key_to_public_key(private_key)
+    public_key_to_address(public_key_bytes)
     end = time.time()
-    print(str(end - start))
+    duration = end - start
+    print(f"Time to generate one address: {duration:.6f} seconds")
+    print(f"Estimated speed per core: {1/duration:.2f} keys/second")
     sys.exit(0)
 
 if __name__ == '__main__':
-    args = {
-        'verbose': 0,
-        'substring': 8,
-        'fastecdsa': platform.system() in ['Linux', 'Darwin'],
-        'cpu_count': multiprocessing.cpu_count(),
-    }
-    
-    for arg in sys.argv[1:]:
-        command = arg.split('=')[0]
-        if command == 'help':
-            print_help()
-        elif command == 'time':
-            timer(args)
-        elif command == 'cpu_count':
-            cpu_count = int(arg.split('=')[1])
-            if cpu_count > 0 and cpu_count <= multiprocessing.cpu_count():
-                args['cpu_count'] = cpu_count
-            else:
-                print('invalid input. cpu_count must be greater than 0 and less than or equal to ' + str(multiprocessing.cpu_count()))
-                sys.exit(-1)
-        elif command == 'verbose':
-            verbose = arg.split('=')[1]
-            if verbose in ['0', '1']:
-                args['verbose'] = verbose
-            else:
-                print('invalid input. verbose must be 0(false) or 1(true)')
-                sys.exit(-1)
-        elif command == 'substring':
-            substring = int(arg.split('=')[1])
-            if substring > 0 and substring < 27:
-                args['substring'] = substring
-            else:
-                print('invalid input. substring must be greater than 0 and less than 27')
-                sys.exit(-1)
-        else:
-            print('invalid input: ' + command  + '\nrun `python3 plutus.py help` for help')
-            sys.exit(-1)
+    # Default to (CPU count - 1) to prevent system freezing, but minimum 1
+    default_cpu_count = multiprocessing.cpu_count()
+    if default_cpu_count > 1:
+        default_cpu_count -= 1
+
+    parser = argparse.ArgumentParser(
+        description='Plutus Bitcoin Brute Forcer',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  python3 plutus.py                   # Run with default settings
+  python3 plutus.py -v 1              # Run with verbose output
+  python3 plutus.py --cpu-count 4     # Run with 4 CPU cores
+  python3 plutus.py time              # Run speed test
+        '''
+    )
+    parser.add_argument('action', nargs='?', default='run', choices=['run', 'time', 'help'], help='Action to perform')
+    parser.add_argument('--verbose', '-v', type=int, choices=[0, 1], default=0, help='Verbose output (0 or 1)')
+    parser.add_argument('--cpu-count', '-c', type=int, default=default_cpu_count, help='Number of CPU cores')
+    parser.add_argument('--substring', '-s', type=int, default=8, help='Deprecated (ignored)')
+
+    args = parser.parse_args()
+
+    if args.action == 'help':
+        parser.print_help()
+        sys.exit(0)
+
+    if args.action == 'time':
+        timer()
+
+    if not (0 < args.cpu_count <= multiprocessing.cpu_count()):
+        print(f'Error: cpu_count must be between 1 and {multiprocessing.cpu_count()}')
+        sys.exit(-1)
     
     print('reading database files...')
-    database = set()
-    for filename in os.listdir(DATABASE):
-        with open(DATABASE + filename) as file:
+    database = BloomFilter(256)
+    count = 0
+    
+    files = [f for f in os.listdir(DATABASE) if os.path.isfile(os.path.join(DATABASE, f))]
+    total_bytes = sum(os.path.getsize(os.path.join(DATABASE, f)) for f in files)
+    bytes_read = 0
+
+    for filename in files:
+        file_path = os.path.join(DATABASE, filename)
+        with open(file_path) as file:
             for address in file:
                 address = address.strip()
                 if address.startswith('1'):
-                    database.add(address[-args['substring']:])
-    print('DONE')
+                    database.add(address)
+                    count += 1
+        
+        bytes_read += os.path.getsize(file_path)
+        sys.stdout.write(f"\rProgress: {bytes_read / total_bytes * 100:.2f}%")
+        sys.stdout.flush()
 
-    print('database size: ' + str(len(database)))
-    print('processes spawned: ' + str(args['cpu_count']))
+    print('\nDONE')
+    print('database size: ' + str(count))
+    print('processes spawned: ' + str(args.cpu_count))
     
-    for cpu in range(args['cpu_count']):
-        multiprocessing.Process(target = main, args = (database, args)).start()
+    args_dict = vars(args)
+    counter = Value('i', 0)
+    processes = []
+    
+    for cpu in range(args.cpu_count):
+        p = multiprocessing.Process(target = main, args = (database, args_dict, counter))
+        p.start()
+        processes.append(p)
+        
+    if not args.verbose:
+        try:
+            while True:
+                time.sleep(1)
+                with counter.get_lock():
+                    rate = counter.value
+                    counter.value = 0
+                sys.stdout.write(f"\rSpeed: {rate} keys/sec    ")
+                sys.stdout.flush()
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            for p in processes:
+                p.terminate()
