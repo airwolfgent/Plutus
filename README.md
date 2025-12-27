@@ -27,33 +27,19 @@ To start the brute forcer with default settings (fastest mode), simply run:
 python3 plutus.py
 ```
 
-## Parameters & Options
-
-You can customize how Plutus runs using command-line arguments.
-
-### 1. Verbose Mode (`-v` or `--verbose`)
-By default, Plutus runs silently and only shows a speed counter. If you want to see every single Bitcoin address being generated in real-time, use this flag.
-*   **Usage**: `python3 plutus.py -v 1`
-*   **Note**: This significantly slows down the program because printing to the screen takes time.
-
-### 2. CPU Core Count (`-c` or `--cpu-count`)
-Plutus uses **all available CPU cores minus one** by default. This ensures your computer remains responsive while the program runs. If you want to use a specific number of cores (or all of them), you can specify it here.
-*   **Usage**: `python3 plutus.py -c 4` (Runs on 4 cores)
-
-### 3. Speed Test (`time`)
-Want to know how fast your computer generates a single address? Run the speed test.
-*   **Usage**: `python3 plutus.py time`
-
-### 4. Help (`help`)
-Shows the help menu.
-*   **Usage**: `python3 plutus.py help`
-
 ## How It Works
 
 1.  **Generate**: The program creates a random 32-byte private key.
 2.  **Convert**: It calculates the public key and the Bitcoin address (P2PKH).
 3.  **Check**: It instantly checks if this address is in the database of funded wallets using a Bloom Filter (a super-fast memory structure).
 4.  **Save**: If a match is found, the private key, public key, and address are saved to a file named `plutus.txt`.
+
+## Speed
+
+Plutus is highly optimized for performance. It takes approximately **0.000125 seconds** to generate and check a single Bitcoin address on a modern CPU core.
+
+Because this program utilizes parallel processing, it scales linearly with your hardware. Your total throughput will be approximately:
+`CPU Cores / 0.000125` keys per second.
 
 ## Expected Output
 
@@ -74,6 +60,27 @@ WIF private key: 5JW4RC...
 public key: 04393B...
 address: 1Kz2CT...
 ```
+
+## Parameters & Options
+
+You can customize how Plutus runs using command-line arguments.
+
+### 1. Verbose Mode (`-v` or `--verbose`)
+By default, Plutus runs silently and only shows a speed counter. If you want to see every single Bitcoin address being generated in real-time, use this flag.
+*   **Usage**: `python3 plutus.py -v 1`
+*   **Note**: This significantly slows down the program because printing to the screen takes time.
+
+### 2. CPU Core Count (`-c` or `--cpu-count`)
+Plutus uses **all available CPU cores minus one** by default. This ensures your computer remains responsive while the program runs. If you want to use a specific number of cores (or all of them), you can specify it here.
+*   **Usage**: `python3 plutus.py -c 4` (Runs on 4 cores)
+
+### 3. Speed Test (`time`)
+Want to know how fast your computer generates a single address? Run the speed test.
+*   **Usage**: `python3 plutus.py time`
+
+### 4. Help (`help`)
+Shows the help menu.
+*   **Usage**: `python3 plutus.py help`
 
 ## Recent Improvements & TODO
 
